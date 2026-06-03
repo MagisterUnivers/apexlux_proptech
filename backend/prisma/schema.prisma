@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Member {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  reservations Reservation[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Reservation {
+  id            String     @id @default(cuid())
+  memberId      String
+  member        Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  destination   String
+  villa         String
+  arrivalDate   DateTime
+  departureDate DateTime
+  proposals     Proposal[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model Proposal {
+  id            String         @id @default(cuid())
+  reservationId String
+  reservation   Reservation    @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  status        ProposalStatus @default(DRAFT)
+  notes         String?
+  items         ProposalItem[]
+  sentEmails    SentEmail[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  sentAt        DateTime?
+}
+
+model ProposalItem {
+  id          String       @id @default(cuid())
+  proposalId  String
+  proposal    Proposal     @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  category    ItemCategory
+  title       String
+  description String
+  scheduledAt DateTime
+  price       Float
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model SentEmail {
+  id          String   @id @default(cuid())
+  proposalId  String
+  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  toEmail     String
+  sentAt      DateTime @default(now())
+  bodyPreview String
+}
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  APPROVED
+  PAID
+}
+
+enum ItemCategory {
+  DINING
+  ACTIVITIES
+  WELLNESS
+  EXCURSIONS
+  TRANSPORT
+  EXPERIENCES
+}

@@ -1,0 +1,528 @@
+openapi: 3.0.0
+info:
+  title: ApexLux — Concierge Itinerary API
+  description: |
+    REST API for the ApexLux Concierge Itinerary Proposal System.
+    Handles reservations, proposals, proposal items, and email simulation.
+  version: 1.0.0
+  contact:
+    name: Andrii Shaposhnikov
+    url: https://github.com/MagisterUnivers
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Service health check
+  - name: Reservations
+    description: Member reservation context
+  - name: Proposals
+    description: Itinerary proposal CRUD and workflow
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        "200":
+          description: Service is live
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  server:
+                    type: string
+                    example: ApexLux API
+
+  /reservations:
+    get:
+      tags: [Reservations]
+      summary: Get active reservation
+      description: Returns the active member reservation including member details.
+      responses:
+        "200":
+          description: Active reservation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /reservations/{id}:
+    get:
+      tags: [Reservations]
+      summary: Get reservation by ID
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: Reservation with proposals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /proposals:
+    get:
+      tags: [Proposals]
+      summary: List all proposals
+      description: "Returns proposals ordered by creation date descending. Supports pagination via page and limit query params (defaults: page=1, limit=20, max limit=100)."
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Proposal"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+    post:
+      tags: [Proposals]
+      summary: Create a draft proposal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProposalBody"
+      responses:
+        "201":
+          description: Created proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /proposals/{id}:
+    get:
+      tags: [Proposals]
+      summary: Get proposal by ID
+      description: Returns proposal with all items ordered by scheduledAt.
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: Proposal with items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Proposals]
+      summary: Update proposal status
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  $ref: "#/components/schemas/ProposalStatus"
+      responses:
+        "200":
+          description: Updated proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Proposals]
+      summary: Delete proposal
+      description: |
+        Permanently deletes a proposal. Only DRAFT or SENT proposals may be deleted.
+        APPROVED and PAID proposals are immutable and cannot be removed.
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "204":
+          description: Proposal deleted successfully
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Cannot delete an APPROVED or PAID proposal
+
+  /proposals/{id}/notes:
+    patch:
+      tags: [Proposals]
+      summary: Update proposal notes
+      description: Updates internal concierge notes on a proposal. Only allowed on DRAFT proposals.
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProposalNotesBody"
+      responses:
+        "200":
+          description: Updated proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /proposals/{id}/items:
+    post:
+      tags: [Proposals]
+      summary: Add item to a DRAFT proposal
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProposalItemBody"
+      responses:
+        "201":
+          description: Created proposal item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ProposalItem"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Proposal is not in DRAFT status
+
+  /proposals/{id}/items/{itemId}:
+    delete:
+      tags: [Proposals]
+      summary: Remove item from proposal
+      description: Removes a single item from a DRAFT proposal. Only allowed while the proposal is in DRAFT status.
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Item removed successfully
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Proposal is not in DRAFT status
+
+  /proposals/{id}/send:
+    post:
+      tags: [Proposals]
+      summary: Send proposal to member
+      description: |
+        Marks proposal as SENT, records a sent_email entry, and returns the email log.
+        The proposal must be in DRAFT status and have at least one item.
+      parameters:
+        - $ref: "#/components/parameters/IdParam"
+      responses:
+        "200":
+          description: Sent proposal and email log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      proposal:
+                        $ref: "#/components/schemas/Proposal"
+                      email:
+                        $ref: "#/components/schemas/SentEmail"
+        "400":
+          description: No items on proposal
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Proposal is not in DRAFT status
+
+components:
+  parameters:
+    IdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+
+  schemas:
+    ProposalStatus:
+      type: string
+      enum: [DRAFT, SENT, APPROVED, PAID]
+
+    ItemCategory:
+      type: string
+      enum: [DINING, ACTIVITIES, WELLNESS, EXCURSIONS, TRANSPORT, EXPERIENCES]
+
+    Member:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          example: James Whitfield
+        email:
+          type: string
+          example: james.whitfield@exclusive-resorts.com
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Reservation:
+      type: object
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+        member:
+          $ref: "#/components/schemas/Member"
+        destination:
+          type: string
+          example: Punta Mita, Mexico
+        villa:
+          type: string
+          example: Villa Punta Mita
+        arrivalDate:
+          type: string
+          format: date-time
+        departureDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProposalItem:
+      type: object
+      properties:
+        id:
+          type: string
+        proposalId:
+          type: string
+        category:
+          $ref: "#/components/schemas/ItemCategory"
+        title:
+          type: string
+          example: Private Chef Dinner
+        description:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        price:
+          type: number
+          example: 450
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SentEmail:
+      type: object
+      properties:
+        id:
+          type: string
+        proposalId:
+          type: string
+        toEmail:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+        bodyPreview:
+          type: string
+
+    Proposal:
+      type: object
+      properties:
+        id:
+          type: string
+        reservationId:
+          type: string
+        reservation:
+          $ref: "#/components/schemas/Reservation"
+        status:
+          $ref: "#/components/schemas/ProposalStatus"
+        notes:
+          type: string
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProposalItem"
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 5
+        totalPages:
+          type: integer
+          example: 1
+
+    CreateProposalBody:
+      type: object
+      required: [reservationId]
+      properties:
+        reservationId:
+          type: string
+        notes:
+          type: string
+
+    UpdateProposalNotesBody:
+      type: object
+      required: [notes]
+      properties:
+        notes:
+          type: string
+          nullable: true
+          maxLength: 1000
+          example: "Adding spa items — James prefers morning sessions"
+
+    CreateProposalItemBody:
+      type: object
+      required: [category, title, description, scheduledAt, price]
+      properties:
+        category:
+          $ref: "#/components/schemas/ItemCategory"
+        title:
+          type: string
+          example: Whale Watching Charter
+        description:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+          example: "2025-03-20T07:00:00.000Z"
+        price:
+          type: number
+          minimum: 0.01
+          example: 320
+
+    ReservationResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Reservation"
+
+    ProposalResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Proposal"
+
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Validation failed
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              message:
+                type: string

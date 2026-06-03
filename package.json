@@ -1,0 +1,9 @@
+{
+  "name": "buena-cpm",
+  "version": "1.0.0",
+  "author": "MagisterUnivers",
+  "license": "MIT",
+  "scripts": {
+    "docker:run": "make run"
+  }
+}
