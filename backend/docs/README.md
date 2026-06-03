@@ -12,25 +12,13 @@ Express + TypeScript REST API for the ApexLux luxury concierge itinerary system.
 - Error handling strategy (AppError + Prisma errors)
 - Proposal state machine (DRAFT → SENT → APPROVED → PAID)
 
-### 2. RouteAndController.md — HTTP Layer
-
-- All endpoints with methods and paths
-- Controller pattern (asyncHandler wrapper)
-- Request/response formats
-
-### 3. DatabaseAndPrisma.md — Data Layer
-
-- Schema: Reservation, Member, Proposal, ProposalItem, SentEmail
-- Prisma singleton pattern
-- Migration strategy (dev vs deploy)
-
-### 4. MiddlewaresAndErrorHandling.md — Cross-Cutting Concerns
+### 2. MiddlewaresAndErrorHandling.md — Cross-Cutting Concerns
 
 - Zod validation middleware
 - Global error handler (AppError + Prisma error classes)
 - asyncHandler wrapper
 
-### 5. LOGGING.md — Observability
+### 3. LOGGING.md — Observability
 
 - Structured logger utility
 - Log levels (DEBUG / INFO / WARN / ERROR)

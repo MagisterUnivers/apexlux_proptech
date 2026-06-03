@@ -12,25 +12,19 @@ Next.js 14 App Router frontend for the ApexLux luxury concierge itinerary system
 - Why state machine approach for the concierge dashboard
 - Tailwind JIT content config (critical — missed paths = silent no styles)
 
-### 2. CreatePropertyPageWrapper.md → ConciergeDashboardWrapper
+### 2. ArchitectureOverview.md — ConciergeDashboardWrapper
 
 - Most complex view in the app
 - Optimistic state management pattern
 - All handler methods explained
 - Modal coordination
 
-### 3. ViewPropertyPageWrapper.md → ProposalView
+### 3. ArchitectureOverview.md — ProposalView
 
 - Member-facing proposal view
 - Client state machine (approve / pay transitions)
 - Hero image with dark overlay
 - Confirmed state animation
-
-### 4. PropertyShowdownWrapper.md → State Management Patterns
-
-- When to use server vs client components
-- Optimistic updates and local state sync
-- useCallback patterns used throughout
 
 ---
 

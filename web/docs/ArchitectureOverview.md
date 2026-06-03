@@ -169,6 +169,6 @@ Focus rings (`focus-visible:ring-2`) and ARIA attributes (`aria-label`, `aria-ex
 
 ---
 
-**Next:** See `CreatePropertyPageWrapper.md` for ConciergeDashboardWrapper deep-dive.
+**Next:** See `ConciergeDashboardWrapper.tsx` and `ProposalView.tsx` in `/web/views/` for the core view implementations.
 
 **Created by** [Andrii Shaposhnikov](https://github.com/MagisterUnivers) — MIT License

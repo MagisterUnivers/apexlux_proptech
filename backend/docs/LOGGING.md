@@ -2,7 +2,7 @@
 
 ## Overview
 
-The BUENA CPM backend uses a **custom, zero-dependency logging utility** designed for structured, readable console output during development and debugging.
+The ApexLux backend uses a **custom, zero-dependency logging utility** designed for structured, readable console output during development and debugging.
 
 **Location:** [`/backend/src/utils/logger.ts`](../src/utils/logger.ts)
 
@@ -222,29 +222,24 @@ logger.info(SERVICE_NAME, "✅ Properties fetched", {
 
 ## Implemented Services
 
-All BUENA CPM services use structured logging:
+All ApexLux services use structured logging:
 
-### PropertyService
+### ProposalService
 
-- `publishNewProperty()` - Property creation with nested buildings/units
-- `getPropertyById()` - Fetch single property
-- `takeAllProperties()` - List with pagination
-- `takeAllPropertiesLight()` - Lightweight list
-- `updateProperty()` - Update with field changes tracking
-- `deleteProperty()` - Delete with cascade tracking
+- `getAllProposals()` - Paginated list with count
+- `getProposalById()` - Fetch single proposal with items
+- `createProposal()` - Create DRAFT linked to reservation
+- `addItemToProposal()` - Add item to DRAFT proposal
+- `removeItemFromProposal()` - Remove item from DRAFT proposal
+- `updateProposalStatus()` - Status transition
+- `updateProposalNotes()` - Update internal notes
+- `deleteProposal()` - Delete DRAFT or SENT proposal
+- `sendProposal()` - Transition to SENT, create SentEmail record
 
-### BuildingService
+### ReservationService
 
-- `createBuilding()` - Building creation with property validation
-- `updateBuilding()` - Update with property migration support
-- `deleteBuilding()` - Delete with unit cascade tracking
-
-### UnitService
-
-- `createUnit()` - Single unit creation
-- `createManyUnits()` - Batch creation with transaction
-- `updateUnit()` - Update with building migration support
-- `deleteUnit()` - Delete operation
+- `getActiveReservation()` - Fetch first upcoming reservation with member
+- `getReservationById()` - Fetch reservation with member and proposals
 
 ## Format Specification
 
