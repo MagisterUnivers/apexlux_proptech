@@ -28,7 +28,7 @@ HTTP Request
 [5] Route matching
     └── Find route definition
     ↓
-[6] propertyValidationMiddleware (Zod)
+[6] validationMiddleware (Zod)
     └── Validate request body/params
     ↓
 [7] asyncHandler wrapper
@@ -109,18 +109,21 @@ Formats and returns JSON response
 
 ---
 
-### 2. propertyValidationMiddleware - Zod Schema Validation
+### 2. validationMiddleware - Zod Schema Validation
 
-**Purpose:** Validate request body/params against Zod schema before controller is called.
+**Purpose:** Validate request body against a Zod schema before the controller is called.
 
 **Implementation:**
 
 ```typescript
-export const propertyValidationMiddleware =
+export const validationMiddleware =
   (schema: ZodSchema) =>
   (req: Request, res: Response, next: NextFunction): void => {
     try {
-      // Parse body against schema
+      logger.debug("ValidationMiddleware", "🔍 Validating request body...", {
+        body: req.body,
+      });
+      // Parse body against schema (replaces body with the parsed value)
       req.body = schema.parse(req.body);
       next(); // Valid → continue to controller
     } catch (error) {
@@ -145,8 +148,8 @@ export const propertyValidationMiddleware =
 ```typescript
 router.post(
   "/",
-  propertyValidationMiddleware(CreatePropertySchema), // Validates first
-  propertyController.createNewProperty, // Only called if validation passes
+  validationMiddleware(CreateProposalSchema), // Validates first
+  proposalController.createProposal, // Only called if validation passes
 );
 ```
 
@@ -154,16 +157,17 @@ router.post(
 
 ```javascript
 // Request:
-POST /api/v1/properties
+POST /api/v1/proposals/:id/items
 {
-  "name": "This name is way too long and exceeds the 100 character maximum",
-  "managementType": "INVALID_TYPE",
-  "propertyManager": "",  // Empty
-  "accountant": "Jane"
+  "category": "INVALID_CATEGORY",
+  "title": "",                          // Empty
+  "description": "Romantic dinner",
+  "scheduledAt": "not-a-date",
+  "price": -100                          // Must be positive
 }
 
 // Zod Schema validation:
-CreatePropertySchema.parse(req.body)
+CreateProposalItemSchema.parse(req.body)
     ↓
 Validation fails on multiple fields
     ↓
@@ -178,41 +182,57 @@ Extracts error.issues
   "message": "Validation failed",
   "errors": [
     {
-      "path": "name",
-      "message": "String must contain at most 100 character(s)"
+      "path": "category",
+      "message": "Invalid enum value"
     },
     {
-      "path": "managementType",
-      "message": "Invalid enum value. Expected 'WEG' | 'MV'"
+      "path": "title",
+      "message": "Too small: expected string to have >=1 characters"
     },
     {
-      "path": "propertyManager",
-      "message": "String must contain at least 1 character(s)"
+      "path": "scheduledAt",
+      "message": "Invalid datetime"
+    },
+    {
+      "path": "price",
+      "message": "Too small: expected number to be >0"
     }
   ]
 }
 ```
 
-**Schema Definition Example:**
+**Schema Definitions (`proposal-schema.ts`):**
 
 ```typescript
-// File: property-schema.ts
+const VALID_STATUSES = ["DRAFT", "SENT", "APPROVED", "PAID"] as const;
+const VALID_CATEGORIES = [
+  "DINING",
+  "ACTIVITIES",
+  "WELLNESS",
+  "EXCURSIONS",
+  "TRANSPORT",
+  "EXPERIENCES",
+] as const;
 
-export const CreatePropertySchema = z.object({
-  name: z.string().max(100), // Required, max 100 chars
-  managementType: z.enum(["WEG", "MV"]), // Required, 2 enum values
-  propertyManager: z.string().max(100), // Required, max 100
-  accountant: z.string().max(100), // Required, max 100
-  divisionDeclarationUrl: z.string().max(500).nullable().optional(), // Optional, URL, max 500
-  buildings: z.array(BuildingSchema).optional(), // Optional array of buildings
+export const CreateProposalSchema = z.object({
+  reservationId: z.string().min(1), // Required, non-empty
+  notes: z.string().optional(), // Optional internal notes
 });
 
-export const UpdatePropertySchema = z.object({
-  name: z.string().max(100).optional(),
-  managementType: z.enum(["WEG", "MV"]).optional(),
-  propertyManager: z.string().max(100).optional(),
-  accountant: z.string().max(100).optional(),
-  divisionDeclarationUrl: z.string().max(500).nullable().optional(),
+export const CreateProposalItemSchema = z.object({
+  category: z.enum(VALID_CATEGORIES), // Required, 6 enum values
+  title: z.string().min(1).max(150), // Required, 1–150 chars
+  description: z.string().min(1), // Required, non-empty
+  scheduledAt: z.string().datetime(), // Required, ISO 8601
+  price: z.number().positive(), // Required, > 0
+});
+
+export const UpdateProposalStatusSchema = z.object({
+  status: z.enum(VALID_STATUSES), // Required, 4 enum values
+});
+
+export const UpdateProposalNotesSchema = z.object({
+  notes: z.string().max(1000).nullable(), // Max 1000, null clears notes
 });
 ```
 
@@ -220,22 +240,23 @@ export const UpdatePropertySchema = z.object({
 
 ```
 1. Wrong type
-   name: 123  (expected string)
+   price: "100"  (expected number)
 
 2. String too long
-   name: "very long name..."  (> 100 chars)
+   title: "very long title..."  (> 150 chars)
 
 3. Invalid enum
-   managementType: "INVALID"  (expected "WEG" or "MV")
+   status: "INVALID"  (expected DRAFT | SENT | APPROVED | PAID)
+   category: "FOOD"   (expected one of 6 ItemCategory values)
 
 4. Missing required field
-   (no "name" provided)
+   (no "reservationId" provided)
 
-5. Invalid URL format
-   divisionDeclarationUrl: "not a url"
+5. Invalid datetime format
+   scheduledAt: "16/03/2026"  (expected ISO 8601)
 
-6. Wrong array item type
-   buildings: [{ street: 123 }]  (street should be string)
+6. Non-positive number
+   price: -100  or  price: 0  (must be > 0)
 ```
 
 ---
@@ -246,28 +267,58 @@ export const UpdatePropertySchema = z.object({
 
 **Implementation:**
 
+The handler inspects the error type in order — `AppError` first, then the
+Prisma error classes (mapping known Prisma codes to HTTP statuses), then a
+catch-all 500.
+
 ```typescript
+const PRISMA_NOT_FOUND = new Set(["P2001", "P2018", "P2025"]);
+const PRISMA_CONFLICT = new Set(["P2002", "P2003"]);
+
 export const errorHandler = (
   error: unknown,
   req: Request,
   res: Response,
   next: NextFunction,
 ): void => {
+  // 1. Expected business errors
   if (error instanceof AppError) {
-    // Custom business logic error
-    res.status(error.status).json({
-      code: error.code,
-      message: error.message,
-    });
+    res.status(error.status).json({ code: error.code, message: error.message });
     return;
   }
 
-  // Unknown/unexpected error
-  console.error(error);
-  res.status(500).json({
-    code: "INTERNAL_ERROR",
-    message: "Something went wrong",
-  });
+  // 2. Known Prisma request errors → mapped HTTP status
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (PRISMA_NOT_FOUND.has(error.code)) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Record not found" });
+      return;
+    }
+    if (PRISMA_CONFLICT.has(error.code)) {
+      res.status(409).json({ code: "CONFLICT", message: "Unique or foreign-key constraint failed" });
+      return;
+    }
+    if (error.code === "P2021") {
+      res.status(500).json({ code: "DB_SCHEMA_ERROR", message: "Table does not exist — run prisma migrate deploy" });
+      return;
+    }
+    res.status(500).json({ code: `PRISMA_${error.code}`, message: error.message });
+    return;
+  }
+
+  // 3. Malformed query → 400
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    res.status(400).json({ code: "INVALID_QUERY", message: "Invalid database query" });
+    return;
+  }
+
+  // 4. DB unreachable → 503
+  if (error instanceof Prisma.PrismaClientInitializationError) {
+    res.status(503).json({ code: "DB_UNAVAILABLE", message: "Database connection failed — check DATABASE_URL and run migrations" });
+    return;
+  }
+
+  // 5. Anything else → 500
+  res.status(500).json({ code: "INTERNAL_ERROR", message: "Something went wrong" });
 };
 ```
 
@@ -276,7 +327,7 @@ export const errorHandler = (
 ```
 Error thrown anywhere
     ↓
-Service throws AppError(404, "NOT_FOUND", "Property not found")
+Service throws AppError(404, "404", "Proposal not found")
     ↓
 asyncHandler catches it
     ↓
@@ -284,36 +335,33 @@ Calls next(error)
     ↓
 errorHandler receives error
     ↓
-Checks: Is error instanceof AppError?
-    ├─ YES: Use error.status, error.code
-    │   └─ Response: 404 + { code: "NOT_FOUND", message: "..." }
-    └─ NO: Use 500 (unknown error)
-        └─ Response: 500 + { code: "INTERNAL_ERROR", message: "..." }
+Checks type in order:
+    ├─ AppError?                       → use error.status + error.code
+    ├─ PrismaClientKnownRequestError?  → map P-code to 404 / 409 / 500
+    ├─ PrismaClientValidationError?    → 400 INVALID_QUERY
+    ├─ PrismaClientInitializationError?→ 503 DB_UNAVAILABLE
+    └─ otherwise                       → 500 INTERNAL_ERROR
 ```
 
 **Error Types Handled:**
 
 ```typescript
 // 1. AppError (expected business errors)
-throw new AppError(404, "404", "Property not found");
-→ Response: 404 { code: "404", message: "Property not found" }
+throw new AppError(404, "404", "Proposal not found");
+→ Response: 404 { code: "404", message: "Proposal not found" }
 
-// 2. Database constraint error
-await db.property.update({ invalid data })
-→ Error thrown by Prisma
-→ Caught by errorHandler
-→ Response: 500 { code: "INTERNAL_ERROR", ... }
+// 2. Prisma known request error (e.g. record to update not found)
+await prisma.proposal.update({ where: { id: "missing" }, data })
+→ PrismaClientKnownRequestError P2025
+→ Response: 404 { code: "NOT_FOUND", message: "Record not found" }
 
-// 3. Unexpected null pointer
-const x = null;
-x.property  // ❌ TypeError
-→ Caught by errorHandler
-→ Response: 500
+// 3. Prisma unique / FK constraint
+await prisma.member.create({ data: { email: "duplicate@x.com" } })
+→ PrismaClientKnownRequestError P2002
+→ Response: 409 { code: "CONFLICT", ... }
 
-// 4. Network error
-await fetch(url)  // Connection timeout
-→ Caught by errorHandler
-→ Response: 500
+// 4. Unexpected error (null pointer, thrown string, etc.)
+→ Response: 500 { code: "INTERNAL_ERROR", message: "Something went wrong" }
 ```
 
 **Note:** errorHandler is registered at the END of app.ts:
@@ -419,43 +467,39 @@ export class AppError extends Error {
 
 ```typescript
 // Throw custom error
-throw new AppError(409, "409", 'Property "Downtown" already exists');
+throw new AppError(409, "CANNOT_DELETE", "Cannot delete an approved or paid proposal");
 
 // Caught by errorHandler
-// Response: { status: 409, code: "409", message: "..." }
+// Response: { status: 409, code: "CANNOT_DELETE", message: "..." }
 ```
 
 ---
 
 ## 🔄 Complete Error Handling Example
 
-### Scenario: Create Property with Duplicate Name
+### Scenario: Send a Proposal That Has No Items
 
 ```
 1. Frontend sends request:
-   POST /api/v1/properties { name: "Downtown" }
+   POST /api/v1/proposals/:id/send
 
-2. Express receives and parses JSON
-   → body = { name: "Downtown", ... }
+2. Express receives the request (no body to parse)
 
-3. propertyValidationMiddleware validates
-   → Schema.parse(req.body)
-   → Zod checks: string, max 100, etc.
-   → Validation passes ✓
-   → Calls next()
+3. No validationMiddleware on this route (no body)
+   → Goes straight to the controller
 
 4. asyncHandler wraps controller
-   → Calls propertyController.createNewProperty(req, res)
+   → Calls proposalController.sendProposal(req, res)
 
-5. Controller extracts body
-   → data = req.body
+5. Controller extracts params
+   → id = req.params.id
 
 6. Controller calls service
-   → await propertyService.publishNewProperty(data)
+   → await proposalService.sendProposal(id)
 
-7. Service checks duplicate
-   → Finds existing property with name "Downtown"
-   → Throws: new AppError(409, "409", "Property \"Downtown\" already exists")
+7. Service loads the proposal and checks its items
+   → proposal.items.length === 0
+   → Throws: new AppError(400, "400", "Cannot send a proposal with no items")
 
 8. Error propagates up (not caught in service)
    → Promise rejects
@@ -465,22 +509,22 @@ throw new AppError(409, "409", 'Property "Downtown" already exists');
 
 10. errorHandler receives error
     → Checks: error instanceof AppError? YES
-    → Uses error.status = 409
-    → Uses error.code = "409"
+    → Uses error.status = 400
+    → Uses error.code = "400"
 
 11. errorHandler sends response:
-    res.status(409).json({
-      code: "409",
-      message: 'Property "Downtown" already exists'
+    res.status(400).json({
+      code: "400",
+      message: "Cannot send a proposal with no items"
     })
 
 12. Response sent to frontend
-    HTTP Status: 409 Conflict
-    Body: { code: "409", message: "..." }
+    HTTP Status: 400 Bad Request
+    Body: { code: "400", message: "..." }
 
 13. Frontend receives error
     → Shows error message to user
-    → "Property \"Downtown\" already exists"
+    → "Cannot send a proposal with no items"
 ```
 
 ---
@@ -492,7 +536,7 @@ throw new AppError(409, "409", 'Property "Downtown" already exists');
 ```typescript
 // 1. Throw AppError with appropriate status
 if (!exists) {
-  throw new AppError(404, "404", "Property not found");
+  throw new AppError(404, "404", "Proposal not found");
 }
 
 // 2. Use asyncHandler for all route handlers
@@ -506,8 +550,8 @@ router.get(
 // 3. Let validation middleware handle input validation
 router.post(
   "/",
-  propertyValidationMiddleware(Schema),
-  asyncHandler(controller.method),
+  validationMiddleware(CreateProposalSchema),
+  proposalController.createProposal,
 );
 
 // 4. Specific error codes for different scenarios
@@ -570,13 +614,13 @@ WRONG ORDER:
 **Middlewares & Error Handling** manage cross-cutting concerns:
 
 - ✅ asyncHandler catches promise errors
-- ✅ propertyValidationMiddleware validates input
-- ✅ errorHandler formats responses
+- ✅ validationMiddleware validates input
+- ✅ errorHandler formats responses (AppError + Prisma error classes)
 - ✅ rateLimiter protects from abuse
 - ✅ AppError class for business errors
 - ✅ Consistent error responses
 
-**Next:** See [PropertyService.md, BuildingService.md, UnitService.md] for implementation details.
+**Next:** See `ArchitectureOverview.md` for the proposal state machine and service layer, `LOGGING.md` for the structured logger.
 
 ---
 

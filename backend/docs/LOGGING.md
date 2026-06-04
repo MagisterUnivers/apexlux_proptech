@@ -66,57 +66,55 @@ All methods accept `(service: string, message: string, data?: any)`
 #### INFO - Operation Start
 
 ```typescript
-logger.info(SERVICE_NAME, "🔄 Starting createUnit", {
-  number: data.number,
-  type: data.type,
-  buildingId: data.buildingId,
+logger.info(SERVICE_NAME, "🔄 Adding item to proposal", {
+  proposalId,
+  category: data.category,
+  title: data.title,
 });
 ```
 
 Console Output:
 
 ```
-ℹ️  10:30:45.123 [MyService] 🔄 Starting createUnit
+ℹ️  10:30:45.123 [ProposalService] 🔄 Adding item to proposal
 {
-  "number": "101",
-  "type": "APARTMENT",
-  "buildingId": "clz5k..."
+  "proposalId": "clz5k...",
+  "category": "DINING",
+  "title": "Private Beach Dinner"
 }
 ```
 
 #### DEBUG - Intermediate Step
 
 ```typescript
-logger.debug(SERVICE_NAME, "⚙️  Validating buildings", {
-  buildingIds,
-  count: buildingIds.length,
+logger.debug(SERVICE_NAME, "🔍 Validating request body...", {
+  body: req.body,
 });
 ```
 
 Console Output:
 
 ```
-🔍 10:30:45.200 [MyService] ⚙️  Validating buildings
+🔍 10:30:45.200 [ValidationMiddleware] 🔍 Validating request body...
 {
-  "buildingIds": ["b1", "b2"],
-  "count": 2
+  "body": { "reservationId": "clz5k...", "notes": "VIP" }
 }
 ```
 
 #### WARN - Validation Issue
 
 ```typescript
-logger.warn(SERVICE_NAME, "⚠️  Building not found", {
-  buildingId: data.buildingId,
+logger.warn(SERVICE_NAME, "❌ Validation failed", {
+  errors: [{ path: "price", message: "Too small: expected number to be >0" }],
 });
 ```
 
 Console Output:
 
 ```
-⚠️  10:30:45.250 [MyService] ⚠️  Building not found
+⚠️  10:30:45.250 [ValidationMiddleware] ❌ Validation failed
 {
-  "buildingId": "invalid-id"
+  "errors": [{ "path": "price", "message": "Too small: expected number to be >0" }]
 }
 ```
 
@@ -136,15 +134,15 @@ try {
 Console Output:
 
 ```
-❌ 10:30:45.300 [MyService] ❌ AppError
+❌ 10:30:45.300 [ProposalService] ❌ AppError
 {
-  "context": "createUnit",
-  "operationId": "op-123"
+  "context": "sendProposal",
+  "proposalId": "clz5k..."
 }
 Stack trace:
-Error: Building not found
-    at buildingService.createUnit (...)
-    at UnitService.createUnit (...)
+Error: Proposal not found
+    at ProposalService.sendProposal (...)
+    at ProposalController.sendProposal (...)
 ```
 
 ## Best Practices
@@ -153,10 +151,9 @@ Error: Building not found
 
 ```typescript
 // ✅ GOOD - Clear what happened and key data
-logger.info(SERVICE_NAME, "✅ Property created", {
-  propertyId: property.id,
-  name: property.name,
-  buildingsCreated: buildings.length,
+logger.info(SERVICE_NAME, "✅ Proposal sent", {
+  id: proposal.id,
+  toEmail: proposal.reservation.member.email,
 });
 
 // ❌ AVOID - Too vague
@@ -177,17 +174,21 @@ logger.info(SERVICE_NAME, "Update operation");
 
 ```typescript
 // ✅ Pattern used throughout services
-public async createBuilding(data: CreateBuildingDto) {
-  logger.info(SERVICE_NAME, "🔄 Starting createBuilding", { ...data });
+public async createProposal(data: CreateProposalDto) {
+  logger.info(SERVICE_NAME, "🔄 Creating proposal", {
+    reservationId: data.reservationId,
+  });
 
-  try {
-    // ... operation
-    logger.info(SERVICE_NAME, "✅ Building created successfully", { results });
-    return result;
-  } catch (error) {
-    logger.error(SERVICE_NAME, "❌ AppError", error, { context });
-    throw error;
+  const reservation = await prismaSingleton.reservation.findUnique({
+    where: { id: data.reservationId },
+  });
+  if (!reservation) {
+    throw new AppError(404, "404", "Reservation not found");
   }
+
+  const proposal = await prismaSingleton.proposal.create({ data: { ... } });
+  logger.info(SERVICE_NAME, "✅ Proposal created", { id: proposal.id });
+  return proposal;
 }
 ```
 
@@ -195,8 +196,8 @@ public async createBuilding(data: CreateBuildingDto) {
 
 ```typescript
 // ✅ GOOD - Log data flows, decisions, results
-logger.debug(SERVICE_NAME, "🔍 Checking for duplicates", { propertyName });
-logger.info(SERVICE_NAME, "✅ No duplicates found, proceeding");
+logger.debug(SERVICE_NAME, "🔍 Validating request body...", { body });
+logger.info(SERVICE_NAME, "✅ Status updated", { id, status });
 
 // ❌ AVOID - Too verbose, logging every line
 logger.debug("Incrementing counter");
@@ -206,17 +207,17 @@ logger.debug("Checking condition");
 ### 5. Include Metrics When Relevant
 
 ```typescript
-// ✅ Useful for operations that fetch/create multiple items
-logger.info(SERVICE_NAME, "✅ Units created in batch", {
-  createdCount: 42,
-  buildingCount: 5,
+// ✅ Useful for operations that compute a summary
+logger.info(SERVICE_NAME, "✅ Proposal sent", {
+  id: proposal.id,
+  itemCount: proposal.items.length,
 });
 
 // For pagination/list operations
-logger.info(SERVICE_NAME, "✅ Properties fetched", {
-  fetchedCount: 10,
-  totalCount: 523,
-  page: 2,
+logger.info(SERVICE_NAME, "✅ Proposals fetched", {
+  count: proposals.length,
+  total: 6,
+  page: 1,
 });
 ```
 
@@ -253,12 +254,11 @@ All log entries follow this format:
 **Example:**
 
 ```
-ℹ️  10:30:45.123 [PropertyService] ✅ Property created successfully
+ℹ️  10:30:45.123 [ProposalService] ✅ Proposal created
 {
-  "propertyId": "clz5k9xyz123",
-  "name": "Downtown Complex",
-  "buildingsCreated": 1,
-  "unitsCreated": 1
+  "id": "clz5k9xyz123",
+  "reservationId": "clz5kres456",
+  "status": "DRAFT"
 }
 ```
 
@@ -286,5 +286,4 @@ The logger utility is designed to be extensible. Potential enhancements:
 ## Related Documentation
 
 - [Architecture Overview](./ArchitectureOverview.md) - System design
-- [PropertyService](./PropertyService.md) - Example of logged service
 - [Error Handling](./MiddlewaresAndErrorHandling.md) - AppError integration

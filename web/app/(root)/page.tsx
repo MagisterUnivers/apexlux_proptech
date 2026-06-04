@@ -46,6 +46,7 @@ export default function Home() {
           alt="Luxury villa overlooking the ocean at Punta Mita"
           width={5272}
           height={2962}
+          unoptimized
           priority
           className="w-full h-full object-cover"
         />
