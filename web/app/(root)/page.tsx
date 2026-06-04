@@ -44,11 +44,10 @@ export default function Home() {
         <Image
           src="/resort-hero.jpg"
           alt="Luxury villa overlooking the ocean at Punta Mita"
-          width={5272}
-          height={2962}
-          unoptimized
+          fill
           priority
-          className="w-full h-full object-cover"
+          sizes="100vw"
+          className="object-cover"
         />
 
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center px-6">
